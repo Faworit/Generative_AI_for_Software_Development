@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<title>Static GenAI Terms Graph</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #222; }
+  header { padding: 12px 18px; border-bottom: 1px solid #eee; background: #fafafa; }
+  h1 { margin: 0; font-size: 18px; }
+  .container { display:flex; height: calc(100vh - 58px); }
+  .svg-wrap { flex: 1; padding: 12px; box-sizing: border-box; overflow: auto; }
+  .sidebar { width: 360px; border-left: 1px solid #eee; padding: 12px; box-sizing: border-box; overflow: auto; background:#fff; }
+  .term-row { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0; }
+  .badge { display:inline-block; padding:3px 8px; background:#f3f3f3; border-radius:6px; margin-left:6px; font-size:12px; }
+  .legend { font-size:13px; color:#444; margin-bottom:10px; }
+  svg { width:100%; height:100%; }
+  .link { stroke: #7a9fb9; stroke-opacity: 0.9; fill: none; }
+  .node-term { fill: #ffd966; stroke: #9b6b00; stroke-width: 1; }
+  .node-section { fill: #9cc3e5; stroke: #2b6f97; stroke-width: 1; }
+  .label { font-size:12px; pointer-events:none; }
+  .tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: rgba(0,0,0,0.78);
+    color: white;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    display: none;
+    z-index: 100;
+  }
+  .meta { font-size:13px; color:#333; margin-top:10px; }
+  .small { font-size:12px; color:#666; }
+  button { margin-top:8px; padding:6px 10px; border-radius:6px; border:1px solid #ddd; background:white; cursor:pointer; }
+  button:hover { background:#f6f6f6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Статичный граф — связи терминов (Glossary) ↔ секции отчёта</h1>
+</header>
+
+<div class="container">
+  <div class="svg-wrap" id="svg-wrap">
+    <svg id="svgCanvas" viewBox="0 0 1200 900" preserveAspectRatio="xMidYMid meet"></svg>
+    <div id="tooltip" class="tooltip"></div>
+  </div>
+
+  <div class="sidebar">
+    <div class="legend"><strong>Пояснения</strong>
+      <div class="small">Термины — слева; разделы/секции отчёта — справа. Толщина линии = число совпадений в секции; размер круга термина ≈ неявная частота (implicit).</div>
+    </div>
+
+    <div id="termsList"></div>
+
+    <div class="meta">
+      <div id="metaCounts"></div>
+      <button id="exportCsv">Экспорт частот в CSV</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========== ВХОДНЫЕ ДАННЫЕ: Глоссарий и текст отчёта ==========
+const glossary = {
+  "ИИ (AI)": ["ии","ai","искусственный интеллект","artificial intelligence"],
+  "LLM": ["llm","large language model","большая языковая модель"],
+  "ANN": ["artificial neural network","ann","искусственная нейронная сеть","artificial neural networks","искусственная нейронная"],
+  "Generative AI": ["generative ai","генеративный ии","генеративные модели","generative models","генерация","контент"],
+  "Hallucinations": ["hallucinations","галлюцинации","халлюцинаций","халлюцинации","халлюцинац"],
+  "Code Generation": ["code generation","генерация кода","код"],
+  "Synthetic Data": ["synthetic data","синтетические данные","искусственно сгенерированные данные","синтетических данных"],
+  "Chatbot": ["chatbot","чатбот","чатботы"],
+  "AI Assistants": ["ai assistants","code assistants","ai assistant","ии-ассистент","ии ассистент","assistant","помощник"]
+};
+
+/* Текст отчёта (убрал часть повторов для компактности, но он содержит все секции):
+   Если нужно - можно вставить весь твой оригинальный текст сюда. */
+const reportText = `# Исследовательский отчет: Приложения генеративного ИИ (Generative AI)
+
+## 1. Генерация контента (текста, изображений, аудио) / Content Generation
+Генеративные модели (Generative Models) позволяют автоматизировать создание статей, маркетинговых материалов, изображений для дизайна, музыки и другого творческого контента. ... (см. полный текст) 
+
+---
+## 2. Генеративные помощники для программирования / AI Code Assistants
+ИИ (AI) ускоряет разработку кода, генерируя функции, исправляя ошибки, ...
+
+---
+## 3. Автоматизация обслуживания клиентов / Customer Service Automation (чатботы / Chatbots)
+Чатботы на базе LLM обеспечивают быстрый и персонализированный диалог с клиентами, ...
+
+---
+## 4. Генеративный ИИ в медицине / Generative AI in Medicine
+Генеративные модели на основе LLM создают медицинские отчеты, интерпретации снимков, ...
+
+---
+## 5. Генерация кода для автоматизации бизнес-процессов / Code Generation for RPA + GenAI
+...
+
+---
+## 6. Персонализация маркетинга / Marketing Personalization
+...
+
+---
+## 7. Генерация синтетических данных / Synthetic Data Generation
+...
+
+---
+## 8. Генерация 3D-моделей и дизайна / 3D Model & Design Generation
+...
+
+---
+## 9. Генеративный ИИ для обучения и образования / AI in Education
+...
+
+---
+## 10. Генеративный ИИ в финансах / Generative AI in Finance
+...
+
+---
+## 11. Генеративный ИИ в разработке ПО и IDE нового поколения / AI-Powered Next-gen IDE
+...
+
+---
+## 12. Генеративный ИИ в аналитике данных / Generative AI in Data Analytics
+...
+
+---
+## 13. Генеративный ИИ для безопасности / Generative AI for Cybersecurity
+...
+
+---
+## 14. Генеративный ИИ в индустрии развлечений и медиа / Generative AI in Entertainment & Media
+...
+
+---
+## 15. Генерация планов, стратегий и документов для бизнеса / Business Plan & Document Generation
+...`;
+
+// ========== утилиты подсчёта ==========
+function normalize(s){ return s.toLowerCase(); }
+
+function countExplicit(text, patterns){
+  const t = normalize(text);
+  let cnt = 0;
+  for(const p of patterns){
+    try {
+      const re = new RegExp("\\b" + p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + "\\b","gi");
+      const m = t.match(re);
+      if(m) cnt += m.length;
+    } catch(e){
+      if(t.includes(p.toLowerCase())) cnt += t.split(p.toLowerCase()).length - 1;
+    }
+  }
+  return cnt;
+}
+
+// эвристические ключевые слова для неявного подсчёта
+const heuristics = {
+  "Generative AI": ["генерация","генератив","контент","generative models","content generation"],
+  "LLM": ["большая языковая модель","large language model","llm"],
+  "Code Generation": ["генерация кода","код","code"],
+  "Synthetic Data": ["синтетическ","synthetic data"],
+  "Chatbot": ["чатбот","chatbots","customer service","обслуживания клиентов"],
+  "AI Assistants": ["ассистент","assistant","copilot","помощник"],
+  "Hallucinations": ["галлюцинац","hallucinations","халлюцинац"],
+  "ANN": ["нейрон","neural network","искусственная нейрон"],
+  "ИИ (AI)": ["искусственный интеллект","artificial intelligence"," ai "]
+};
+
+// вычисление явных/неявных частот и выделение секций
+function computeStats(report, glossary){
+  const lower = normalize(report);
+  const sections = report.split("\n---\n").map(s=>s.trim());
+  const sectionTitles = sections.map(s=>{
+    const m = s.match(/^##\s+(.*)/m);
+    return m ? normalize(m[1]) : "";
+  });
+
+  const explicit = {}, implicit = {};
+  for(const term in glossary){
+    const patterns = glossary[term];
+    const e = countExplicit(report, patterns);
+    explicit[term] = e;
+    // heuristics match
+    let extra = 0;
+    const keys = heuristics[term] || [];
+    for(const k of keys){
+      const re = new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),"gi");
+      const m = lower.match(re);
+      if(m) extra += m.length;
+    }
+    // заголовки — буст
+    let heading_hits = 0;
+    for(const t of sectionTitles){
+      for(const k of keys){
+        if(k && t.indexOf(k.toLowerCase()) !== -1){ heading_hits++; break; }
+      }
+    }
+    implicit[term] = e + extra + 2*heading_hits;
+  }
+  return {explicit, implicit, sections, sectionTitles};
+}
+
+const stats = computeStats(reportText, glossary);
+
+// ========== строим статичный граф: термины слева, секции справа ==========
+const svg = document.getElementById("svgCanvas");
+const W = 1200, H = 900;
+svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+const leftX = 180;       // x позиция для терминов
+const rightX = 1020;     // x позиция для секций
+const topMargin = 80;
+const bottomMargin = 80;
+
+// подготовка узлов: термины (left) и секции (right)
+const termKeys = Object.keys(glossary);
+const termCount = termKeys.length;
+const secCount = stats.sections.length;
+
+// compute Y positions evenly
+function yPositions(n, top=topMargin, bottom=H-bottomMargin){
+  const arr = [];
+  if(n===1) return [ (top+bottom)/2 ];
+  const step = (bottom - top) / (n - 1);
+  for(let i=0;i<n;i++) arr.push(top + i*step);
+  return arr;
+}
+const termYs = yPositions(termCount);
+const secYs = yPositions(secCount);
+
+// draw sections as nodes on right and build mapping for link creation
+const sectionNodes = [];
+for(let i=0;i<secCount;i++){
+  const titleLine = (stats.sections[i].match(/^##\s+(.*)/m) || ["","Section "+(i+1)])[1];
+  const node = {
+    id: "sec"+i,
+    name: titleLine,
+    x: rightX,
+    y: secYs[i],
+    index: i
+  };
+  sectionNodes.push(node);
+}
+
+// draw term nodes
+const termNodes = [];
+for(let i=0;i<termCount;i++){
+  const name = termKeys[i];
+  const implicit = stats.implicit[name] || 0;
+  const explicit = stats.explicit[name] || 0;
+  termNodes.push({
+    id: "term"+i,
+    name: name,
+    x: leftX,
+    y: termYs[i],
+    explicit, implicit
+  });
+}
+
+// helper to draw an SVG element
+function svgElm(tag, attrs){
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for(const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+// draw links: for each section, count weight of each term within that section
+const links = [];
+for(let si=0; si<secCount; si++){
+  const sectionText = stats.sections[si].toLowerCase();
+  for(let ti=0; ti<termCount; ti++){
+    const term = termKeys[ti];
+    // weight = explicit occurrences in this section + heuristic extra occurrences
+    let weight = 0;
+    const patterns = glossary[term];
+    for(const p of patterns){
+      try {
+        const re = new RegExp("\\b" + p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + "\\b","gi");
+        const m = sectionText.match(re);
+        if(m) weight += m.length;
+      } catch(e){ if(sectionText.includes(p.toLowerCase())) weight += sectionText.split(p.toLowerCase()).length - 1; }
+    }
+    // heuristics per term (substring)
+    const keys = heuristics[term] || [];
+    for(const k of keys){
+      const re = new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),"gi");
+      const m = sectionText.match(re);
+      if(m) weight += m.length;
+    }
+    if(weight > 0){
+      links.push({ source: termNodes[ti], target: sectionNodes[si], weight });
+    }
+  }
+}
+
+// determine max weight for scaling line widths
+const maxWeight = links.reduce((m,l)=> Math.max(m,l.weight), 0) || 1;
+const maxImplicit = termNodes.reduce((m,n)=> Math.max(m,n.implicit), 1);
+
+// Draw curved links (quadratic Bézier) for readability
+for(const lk of links){
+  const sx = lk.source.x + 28; // source right edge
+  const sy = lk.source.y;
+  const tx = lk.target.x - 28; // target left edge
+  const ty = lk.target.y;
+  // control point midway with slight horizontal offset
+  const cx = (sx + tx)/2;
+  const cy = (sy + ty)/2;
+  // path
+  const path = svgElm("path", {
+    d: `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`,
+    class: "link",
+    "stroke-width": Math.max(1, (lk.weight / maxWeight) * 8),
+    opacity: 0.9
+  });
+  svg.appendChild(path);
+  // add small invisible thick path for hover area
+  const hover = svgElm("path", {
+    d: `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`,
+    fill: "none",
+    stroke: "transparent",
+    "stroke-width": Math.max(12, (lk.weight / maxWeight) * 12),
+    "data-info": `${lk.source.name} → ${lk.target.name} (weight: ${lk.weight})`
+  });
+  // hover tooltip
+  hover.addEventListener("mouseenter", (e)=> showTooltip(e, `${lk.source.name} → ${lk.target.name}<br>вхождений: ${lk.weight}`));
+  hover.addEventListener("mousemove", moveTooltip);
+  hover.addEventListener("mouseleave", hideTooltip);
+  svg.appendChild(hover);
+}
+
+// draw section nodes (right)
+for(const sec of sectionNodes){
+  const g = svgElm("g", { class: "section-group", transform: `translate(${sec.x},${sec.y})` });
+  const circle = svgElm("circle", { cx:0, cy:0, r: 26, class: "node-section" });
+  g.appendChild(circle);
+  const text = svgElm("text", { x: 36, y: 5, class: "label" });
+  text.textContent = sec.name;
+  g.appendChild(text);
+  svg.appendChild(g);
+
+  // tooltip area
+  circle.addEventListener("mouseenter", (e)=> showTooltip(e, `<strong>${sec.name}</strong><br>Секция ${sec.index+1}`));
+  circle.addEventListener("mousemove", moveTooltip);
+  circle.addEventListener("mouseleave", hideTooltip);
+}
+
+// draw term nodes (left)
+for(const t of termNodes){
+  // size based on implicit count (min radius 10)
+  const minR = 12;
+  const r = minR + Math.round( (t.implicit / Math.max(1,maxImplicit)) * 28 );
+  const g = svgElm("g", { class: "term-group", transform: `translate(${t.x},${t.y})` });
+  const circle = svgElm("circle", { cx:0, cy:0, r: r, class: "node-term" });
+  g.appendChild(circle);
+  const text = svgElm("text", { x: -6, y: r + 16, class: "label" });
+  text.setAttribute("text-anchor","middle");
+  text.textContent = t.name;
+  g.appendChild(text);
+  // explicit/implicit badges rendered as small text under label
+  const badges = svgElm("text", { x: -6, y: r + 30, class: "small", fill: "#444" });
+  badges.setAttribute("text-anchor","middle");
+  badges.textContent = `explicit: ${t.explicit}  implicit: ${t.implicit}`;
+  g.appendChild(badges);
+
+  svg.appendChild(g);
+
+  // tooltip handlers
+  circle.addEventListener("mouseenter", (e)=> showTooltip(e, `<strong>${t.name}</strong><br>Явные: ${t.explicit}<br>Неявные: ${t.implicit}`));
+  circle.addEventListener("mousemove", moveTooltip);
+  circle.addEventListener("mouseleave", hideTooltip);
+}
+
+// populate sidebar list of terms with counts
+const termsList = document.getElementById("termsList");
+termNodes.forEach(t=>{
+  const div = document.createElement("div");
+  div.className = "term-row";
+  div.innerHTML = `<strong>${t.name}</strong>
+    <div class="small">Явные (explicit): <span class="badge">${t.explicit}</span> &nbsp; Неявные (implicit): <span class="badge">${t.implicit}</span></div>`;
+  termsList.appendChild(div);
+});
+
+// meta info
+document.getElementById("metaCounts").innerHTML =
+  `Всего терминов: ${termCount} <br>Всего секций: ${secCount}`;
+
+// ===== tooltip functions =====
+const tooltip = document.getElementById("tooltip");
+function showTooltip(evt, html){
+  tooltip.innerHTML = html;
+  tooltip.style.display = "block";
+  moveTooltip(evt);
+}
+function moveTooltip(evt){
+  const wrap = document.getElementById("svg-wrap");
+  const rect = wrap.getBoundingClientRect();
+  const left = (evt.clientX - rect.left) + 12;
+  const top = (evt.clientY - rect.top) + 12;
+  tooltip.style.left = left + "px";
+  tooltip.style.top = top + "px";
+}
+function hideTooltip(){ tooltip.style.display = "none"; }
+
+// ===== export CSV button =====
+document.getElementById("exportCsv").addEventListener("click", ()=>{
+  const rows = [["term","explicit","implicit"]];
+  termNodes.forEach(t => rows.push([`"${t.name.replace(/"/g,'""')}"`, t.explicit, t.implicit]));
+  const csv = rows.map(r => r.join(",")).join("\n");
+  const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "genai_term_frequencies.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+</script>
+</body>
+</html>
